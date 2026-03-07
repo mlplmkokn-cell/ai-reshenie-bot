@@ -12,11 +12,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- КОНФИГУРАЦИЯ ---
-BOT_TOKEN = os.getenv('')
-SHOP_ID = os.getenv('')
-SHOP_API_KEY = os.getenv('')
-FREE_GEMINI_KEY = os.getenv('')
-VIP_GEMINI_KEY = os.getenv('')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+
+SHOP_ID = os.getenv('SHOP_ID')
+
+SHOP_API_KEY = os.getenv('SHOP_API_KEY')
+
+FREE_GEMINI_KEY = os.getenv('FREE_GEMINI_KEY')
+
+VIP_GEMINI_KEY = os.getenv('VIP_GEMINI_KEY')
+
+BOT_USERNAME = os.getenv('BOT_USERNAME')
+
+DATABASE_URL = os.getenv('DATABASE_URL')
 
 MAX_RPM = 15 # Лимит запросов в минуту
 
