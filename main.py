@@ -69,10 +69,15 @@ def ask_ai(prompt, key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=60)
-        return res.json()['candidates'][0]['content']['parts'][0]['text']
-    except:
+        res_data = res.json()
+        if 'candidates' in res_data:
+            return res_data['candidates'][0]['content']['parts'][0]['text']
+        else:
+            print(f"Gemini Error: {res_data}") # Это появится в логах Render
+            return "❌ Ошибка нейросети. Попробуй еще раз через пару секунд."
+    except Exception as e:
+        print(f"Network Error: {e}")
         return "❌ Ошибка нейросети. Попробуй еще раз через пару секунд."
-
 # --- ОБРАБОТЧИКИ ---
 
 @bot.message_handler(commands=['start'])
