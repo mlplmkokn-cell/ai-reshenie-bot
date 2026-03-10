@@ -131,7 +131,7 @@ def vip_command(message):
     try:
         payment = Payment.create({
             "amount": {"value": str(price), "currency": "RUB"},
-            "confirmation": {"type": "redirect", "return_url": "return_url": "https://t.me/Speed_fotoGDZ_bot"}, # ВСТАВЬ ТУТ ЮЗЕРНЕЙМ СВОЕГО БОТА
+            "confirmation": {"type": "redirect", "return_url": "https://t.me/Speed_fotoGDZ_bot"}, # ВСТАВЬ ТУТ ЮЗЕРНЕЙМ СВОЕГО БОТА
             "capture": True,
             "description": "Оплата VIP статуса"
         })
