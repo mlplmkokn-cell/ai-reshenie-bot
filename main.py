@@ -68,22 +68,20 @@ def init_db():
 def ask_ai(prompt, key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
     try:
-        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=60)
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        res = requests.post(url, json=payload, timeout=60)
         res_data = res.json()
         if 'candidates' in res_data:
             return res_data['candidates'][0]['content']['parts'][0]['text']
-        else:
-            print(f"Gemini Error: {res_data}") # Это появится в логах Render
-            return "❌ Ошибка нейросети. Попробуй еще раз через пару секунд."
+        return "❌ Ошибка: ИИ не смог ответить. Попробуй позже."
     except Exception as e:
-        print(f"Network Error: {e}")
-        return "❌ Ошибка нейросети. Попробуй еще раз через пару секунд."
+        return f"❌ Ошибка связи: {str(e)}"
 # --- ОБРАБОТЧИКИ ---
 
 @bot.message_handler(commands=['start'])
 def start(message):
     db_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (message.from_user.id,), commit=True)
-    text = (
+   text = (
         "Привет!\n"
         "Присылай фото или текст, я всё решу. 🚀\n\n"
         "В зависимости от загруженности я могу ответить в течение двух минут. "
