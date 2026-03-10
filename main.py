@@ -78,11 +78,14 @@ def ask_ai(prompt, key):
 @bot.message_handler(commands=['start'])
 def start(message):
     db_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (message.from_user.id,), commit=True)
-   bot.send_message(message.chat.id, """Привет!
-Присылай фото или текст, я всё решу. 🚀
+    text = (
+        "Привет!\n"
+        "Присылай фото или текст, я всё решу. 🚀\n\n"
+        "В зависимости от загруженности я могу ответить в течение двух минут. "
+        "Если хочешь мгновенных ответов без очереди — попробуй наш VIP-режим!"
+    )
+    bot.send_message(message.chat.id, text)
 
-В зависимости от загруженности я могу ответить в течение двух минут.
-Если хочешь мгновенных ответов без очереди — попробуй наш VIP-режим!""")
 @bot.message_handler(commands=['vip'])
 def buy_vip(message):
     uid = message.from_user.id
