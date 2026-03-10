@@ -78,8 +78,8 @@ def ask_ai(prompt, key):
 
 @bot.message_handler(commands=['start'])
 def start(message):
-        db_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (message.from_user.id,), commit=True)
-        welcome_text = (
+     db_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (message.from_user.id,), commit=True)
+     welcome_text = (
         "Привет!\n"
         "Присылай фото или текст, я всё решу. 🚀\n\n"
         "В зависимости от загруженности я могу ответить в течение двух минут. "
