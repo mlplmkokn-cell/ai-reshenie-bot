@@ -18,7 +18,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Bot is running and bypassed", 200
+    return "Bot is running with Proxy Bypass", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8000))
@@ -79,10 +79,15 @@ def check_trial_used(user_id):
 
 def ask_ai(prompt, base64_img, key, is_vip):
     try:
-        # Настройка API
+        # --- ПОПЫТКА ОБХОДА БЛОКИРОВКИ РЕГИОНА ---
+        # Мы пробуем прокинуть запросы через прокси, если Render забанен
+        # ВНИМАНИЕ: Если этот прокси упадет, Google снова выдаст ошибку региона.
+        # В идеале здесь должен быть ваш платный прокси.
+        os.environ['https_proxy'] = "http://167.172.189.231:80" 
+
         genai.configure(api_key=key)
         
-        # Настройки безопасности (помогают избежать лишних блокировок контента)
+        # Отключаем все фильтры "безопасности" Google
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -100,6 +105,7 @@ def ask_ai(prompt, base64_img, key, is_vip):
         contents = [f"{sys_prompt}\nЗадание: {prompt}"]
         
         if base64_img:
+            # Конвертируем обратно в байты для библиотеки Google
             image_data = base64.b64decode(base64_img)
             contents.append({
                 "mime_type": "image/jpeg",
@@ -111,16 +117,16 @@ def ask_ai(prompt, base64_img, key, is_vip):
         
         if response.text:
             return response.text
-        return "❌ Нейросеть не смогла сформировать текст."
+        return "❌ Нейросеть прислала пустой ответ."
             
     except Exception as e:
         error_msg = str(e)
         print(f"!!! Ошибка Google API: {error_msg}")
         
         if "location" in error_msg.lower():
-            return "⚠️ Ошибка: Google временно ограничивает доступ для этого сервера. Попробуйте повторить запрос через минуту или отправьте текст без фото."
+            return "⚠️ Ошибка региона. Google блокирует сервер. Попробуйте еще раз или напишите позже (я чиню обход)."
         
-        return "❌ Произошла техническая ошибка. Пожалуйста, попробуйте еще раз."
+        return "❌ Ошибка нейросети. Попробуйте отправить задачу еще раз."
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -156,8 +162,7 @@ def vip_command(message):
         markup.add(InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_{payment.id}"))
         
         bot.send_message(message.chat.id, f"💎 VIP за {int(price)}₽\n\nДаёт подробные решения и работу без очереди!", reply_markup=markup)
-    except Exception as e:
-        print(f"Ошибка платежки: {e}")
+    except:
         bot.send_message(message.chat.id, "❌ Ошибка платежной системы.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
@@ -186,7 +191,7 @@ def handle_all(message):
     img_b64 = None
 
     if message.content_type == 'photo':
-        status = bot.reply_to(message, "⏳ Обрабатываю данные...")
+        status = bot.reply_to(message, "⏳ Обрабатываю...")
         try:
             file_info = bot.get_file(message.photo[-1].file_id)
             file_data = bot.download_file(file_info.file_path)
@@ -200,10 +205,10 @@ def handle_all(message):
     
     if is_vip:
         vip_queue.put(task)
-        bot.send_message(message.chat.id, "🚀 VIP запрос принят. Решаю...")
+        bot.send_message(message.chat.id, "🚀 VIP: Решаю вне очереди...")
     else:
         free_queue.put(task)
-        bot.send_message(message.chat.id, "⏳ Задача в очереди. Для мгновенного решения купите /vip.")
+        bot.send_message(message.chat.id, "⏳ Задача в очереди.")
 
 def worker():
     while True:
