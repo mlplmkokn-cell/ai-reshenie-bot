@@ -86,9 +86,9 @@ def check_trial_used(user_id):
     except:
         return False
 
-# Прямой HTTP запрос (надежнее, чем глючная библиотека Google)
+# Прямой HTTP запрос (исправлено на v1beta и правильный формат данных)
 def ask_ai(prompt, img_b64, api_key, is_vip):
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     
     if is_vip:
@@ -96,29 +96,39 @@ def ask_ai(prompt, img_b64, api_key, is_vip):
     else:
         sys_prompt = "Дай только краткий ответ. В конце напиши: 'Для подробного решения купите /vip'."
         
-    parts = [{"text": f"{sys_prompt}\nЗадание: {prompt}"}]
+    # Правильная структура запроса для API Google
+    contents = {
+        "contents": [{
+            "parts": [
+                {"text": f"{sys_prompt}\nЗадание: {prompt}"}
+            ]
+        }]
+    }
     
     if img_b64:
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_b64}})
-        
-    payload = {"contents": [{"parts": parts}]}
+        contents["contents"][0]["parts"].append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": img_b64
+            }
+        })
 
     try:
         print(f">>> Запрос к Gemini (VIP: {is_vip})...")
-        response = requests.post(url, headers=headers, json=payload, timeout=40)
+        response = requests.post(url, headers=headers, json=contents, timeout=40)
         res_json = response.json()
         
-        if 'error' in res_json:
-            error_msg = res_json['error']['message']
-            print(f"!!! Ошибка Google API: {error_msg}")
-            return f"⚠️ Ошибка нейросети: {error_msg}"
-            
+        # Логируем ответ для отладки
+        if response.status_code != 200:
+            print(f"!!! Ошибка API ({response.status_code}): {res_json}")
+            return f"⚠️ Ошибка нейросети. Проверьте логи Railway."
+
         return res_json['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
         print(f"!!! Ошибка запроса: {e}")
         return "❌ Ошибка связи с сервером AI. Попробуйте отправить задачу еще раз."
 
-# Оборачиваем хэндлеры в проверку токена, чтобы код не крашился при деплое
+# Оборачиваем хэндлеры в проверку токена
 if BOT_TOKEN:
     @bot.message_handler(commands=['start'])
     def start(message):
