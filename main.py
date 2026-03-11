@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 from yookassa import Configuration, Payment
 from flask import Flask
 
+# Импортируем официальную библиотеку Google
+import google.generativeai as genai
+
 app = Flask(__name__)
 
 @app.route('/')
@@ -75,36 +78,45 @@ def check_trial_used(user_id):
     return True if result and result[0] else False
 
 def ask_ai(prompt, base64_img, key, is_vip):
-    # Используем v1beta для лучшей поддержки фото
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
-    
-    if is_vip:
-        sys_prompt = "Ты — профессиональный репетитор. Реши задачу. Дай очень подробное решение с пояснениями."
-    else:
-        sys_prompt = "Дай только краткий ответ. В конце напиши: 'Для подробного решения купите VIP'."
-        
-    parts = [{"text": f"{sys_prompt}\nЗадание: {prompt}"}]
-    
-    if base64_img:
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": base64_img}})
-        
-    payload = {"contents": [{"parts": parts}]}
-    
     try:
-        # Увеличили таймаут до 90 секунд, чтобы нейросеть успела подумать
-        print(f">>> Отправляю запрос к Gemini (is_vip={is_vip})...")
-        response = requests.post(url, json=payload, timeout=90)
+        # Настраиваем ключ для библиотеки
+        genai.configure(api_key=key)
         
-        if response.status_code != 200:
-            print(f"!!! Ошибка API: {response.text}")
-            return "❌ Нейросеть сейчас занята. Попробуй через минуту."
+        # Используем стабильную модель
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        if is_vip:
+            sys_prompt = "Ты — профессиональный репетитор. Реши задачу. Дай очень подробное решение с пояснениями."
+        else:
+            sys_prompt = "Дай только краткий ответ. В конце напиши: 'Для подробного решения купите VIP'."
             
-        res_json = response.json()
-        answer = res_json['candidates'][0]['content']['parts'][0]['text']
-        return answer
+        # Формируем список данных для отправки
+        contents = [f"{sys_prompt}\nЗадание: {prompt}"]
+        
+        # Если есть фото, декодируем его из base64 в байты (так требует библиотека)
+        if base64_img:
+            image_data = base64.b64decode(base64_img)
+            contents.append({
+                "mime_type": "image/jpeg",
+                "data": image_data
+            })
+            
+        print(f">>> Отправляю запрос к Gemini через genai (is_vip={is_vip})...")
+        
+        # Вызываем нейросеть
+        response = model.generate_content(contents)
+        
+        if response.text:
+            return response.text
+        else:
+            return "❌ Нейросеть прислала пустой ответ."
+            
     except Exception as e:
-        print(f"!!! Ошибка при вызове Gemini: {e}")
-        return "❌ Не удалось получить ответ. Попробуй сделать фото более чётким."
+        error_msg = str(e)
+        print(f"!!! Ошибка при вызове Gemini (genai): {error_msg}")
+        if "location" in error_msg.lower():
+            return "❌ Ошибка: Google все еще блокирует регион сервера."
+        return f"❌ Не удалось получить ответ: {error_msg[:100]}"
 
 @bot.message_handler(commands=['start'])
 def start(message):
