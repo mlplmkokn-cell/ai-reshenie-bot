@@ -11,14 +11,14 @@ from dotenv import load_dotenv
 from yookassa import Configuration, Payment
 from flask import Flask
 
-# Импортируем официальную библиотеку Google
+# Официальная библиотека Google
 import google.generativeai as genai
 
 app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Bot is running", 200
+    return "Bot is running and bypassed", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8000))
@@ -79,21 +79,26 @@ def check_trial_used(user_id):
 
 def ask_ai(prompt, base64_img, key, is_vip):
     try:
-        # Настраиваем ключ для библиотеки
+        # Настройка API
         genai.configure(api_key=key)
         
-        # Используем стабильную модель
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Настройки безопасности (помогают избежать лишних блокировок контента)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        
+        model = genai.GenerativeModel('gemini-1.5-flash', safety_settings=safety_settings)
         
         if is_vip:
-            sys_prompt = "Ты — профессиональный репетитор. Реши задачу. Дай очень подробное решение с пояснениями."
+            sys_prompt = "Ты — профессиональный репетитор. Реши задачу подробно с пояснениями."
         else:
             sys_prompt = "Дай только краткий ответ. В конце напиши: 'Для подробного решения купите VIP'."
             
-        # Формируем список данных для отправки
         contents = [f"{sys_prompt}\nЗадание: {prompt}"]
         
-        # Если есть фото, декодируем его из base64 в байты (так требует библиотека)
         if base64_img:
             image_data = base64.b64decode(base64_img)
             contents.append({
@@ -101,22 +106,21 @@ def ask_ai(prompt, base64_img, key, is_vip):
                 "data": image_data
             })
             
-        print(f">>> Отправляю запрос к Gemini через genai (is_vip={is_vip})...")
-        
-        # Вызываем нейросеть
+        print(f">>> Запрос к Gemini (VIP: {is_vip})...")
         response = model.generate_content(contents)
         
         if response.text:
             return response.text
-        else:
-            return "❌ Нейросеть прислала пустой ответ."
+        return "❌ Нейросеть не смогла сформировать текст."
             
     except Exception as e:
         error_msg = str(e)
-        print(f"!!! Ошибка при вызове Gemini (genai): {error_msg}")
+        print(f"!!! Ошибка Google API: {error_msg}")
+        
         if "location" in error_msg.lower():
-            return "❌ Ошибка: Google все еще блокирует регион сервера."
-        return f"❌ Не удалось получить ответ: {error_msg[:100]}"
+            return "⚠️ Ошибка: Google временно ограничивает доступ для этого сервера. Попробуйте повторить запрос через минуту или отправьте текст без фото."
+        
+        return "❌ Произошла техническая ошибка. Пожалуйста, попробуйте еще раз."
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -152,7 +156,8 @@ def vip_command(message):
         markup.add(InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_{payment.id}"))
         
         bot.send_message(message.chat.id, f"💎 VIP за {int(price)}₽\n\nДаёт подробные решения и работу без очереди!", reply_markup=markup)
-    except:
+    except Exception as e:
+        print(f"Ошибка платежки: {e}")
         bot.send_message(message.chat.id, "❌ Ошибка платежной системы.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
@@ -181,7 +186,7 @@ def handle_all(message):
     img_b64 = None
 
     if message.content_type == 'photo':
-        status = bot.reply_to(message, "⏳ Обрабатываю фото...")
+        status = bot.reply_to(message, "⏳ Обрабатываю данные...")
         try:
             file_info = bot.get_file(message.photo[-1].file_id)
             file_data = bot.download_file(file_info.file_path)
@@ -195,28 +200,29 @@ def handle_all(message):
     
     if is_vip:
         vip_queue.put(task)
-        bot.send_message(message.chat.id, "🚀 VIP: Задача в приоритете. Решаю...")
+        bot.send_message(message.chat.id, "🚀 VIP запрос принят. Решаю...")
     else:
         free_queue.put(task)
-        bot.send_message(message.chat.id, "⏳ Задача в очереди. VIP решает быстрее!")
+        bot.send_message(message.chat.id, "⏳ Задача в очереди. Для мгновенного решения купите /vip.")
 
 def worker():
     while True:
-        task = None
-        if not vip_queue.empty():
-            task = vip_queue.get()
-            key = VIP_GEMINI_KEY
-        elif not free_queue.empty():
-            task = free_queue.get()
-            key = FREE_GEMINI_KEY
-        
-        if task:
-            print(f"--- Начинаю решать задачу для {task['chat_id']} ---")
-            ans = ask_ai(task['text'], task['img'], key, task['is_vip'])
-            bot.send_message(task['chat_id'], ans)
-            print(f"--- Задача решена ---")
-        
-        time.sleep(1) # Небольшая пауза чтобы не спамить API
+        try:
+            task = None
+            if not vip_queue.empty():
+                task = vip_queue.get()
+                key = VIP_GEMINI_KEY
+            elif not free_queue.empty():
+                task = free_queue.get()
+                key = FREE_GEMINI_KEY
+            
+            if task:
+                ans = ask_ai(task['text'], task['img'], key, task['is_vip'])
+                bot.send_message(task['chat_id'], ans)
+                time.sleep(2)
+        except Exception as e:
+            print(f"Ошибка воркера: {e}")
+        time.sleep(1)
 
 threading.Thread(target=worker, daemon=True).start()
 
