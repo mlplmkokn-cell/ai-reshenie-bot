@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Bot is active on Railway", 200
+    return "Bot is alive", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8000))
@@ -29,8 +29,6 @@ FREE_GEMINI_KEY = os.getenv('FREE_GEMINI_KEY')
 VIP_GEMINI_KEY = os.getenv('VIP_GEMINI_KEY')
 
 bot = telebot.TeleBot(BOT_TOKEN)
-
-# Очереди задач
 free_queue = queue.Queue()
 vip_queue = queue.Queue()
 
@@ -45,11 +43,24 @@ def init_db():
 
 init_db()
 
-def ask_ai_direct(prompt, img_b64, api_key):
+def check_vip(user_id):
+    try:
+        conn = sqlite3.connect('data_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_vip FROM users WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        return True if result and result[0] else False
+    except: return False
+
+def ask_ai_direct(prompt, img_b64, api_key, is_vip):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     
-    parts = [{"text": f"Реши задачу: {prompt}"}]
+    # Твои старые системные промпты
+    sys_instruction = "Ты профессиональный репетитор. Реши задачу подробно." if is_vip else "Дай только краткий ответ. Для подробного решения купите VIP."
+    
+    parts = [{"text": f"{sys_instruction}\nЗадание: {prompt}"}]
     if img_b64:
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_b64}})
     
@@ -58,13 +69,17 @@ def ask_ai_direct(prompt, img_b64, api_key):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         res_json = response.json()
+        # Выводим ошибку в логи Railway, если она есть
+        if 'error' in res_json:
+            print(f"!!! Ошибка от Google: {res_json['error']['message']}")
+            return f"⚠️ Ошибка нейросети: {res_json['error']['message']}"
         return res_json['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
-        print(f"AI Error: {e}")
-        return "❌ Ошибка нейросети. Попробуй еще раз."
+        print(f"!!! Критическая ошибка запроса: {e}")
+        return "❌ Техническая ошибка. Попробуйте еще раз."
 
 def worker():
-    print("Воркер запущен...")
+    print("Воркер запущен и ждет задачи...")
     while True:
         task = None
         if not vip_queue.empty():
@@ -75,19 +90,23 @@ def worker():
             key = FREE_GEMINI_KEY
         
         if task:
-            ans = ask_ai_direct(task['text'], task['img'], key)
+            ans = ask_ai_direct(task['text'], task['img'], key, task['is_vip'])
             bot.send_message(task['chat_id'], ans)
-            time.sleep(1)
+            print(f"Выполнена задача для {task['chat_id']}")
         time.sleep(1)
 
 threading.Thread(target=worker, daemon=True).start()
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "Привет! Пришли задачу (текст или фото).")
+    # Возвращаем твой старый текст
+    bot.send_message(message.chat.id, "Привет! Я Решала. 📚\nПришли фото или текст задачи — я помогу!")
 
 @bot.message_handler(content_types=['text', 'photo'])
 def handle_message(message):
+    user_id = message.from_user.id
+    is_vip = check_vip(user_id)
+    
     text = message.text or message.caption or "Реши задачу"
     img_b64 = None
 
@@ -96,10 +115,15 @@ def handle_message(message):
         file_data = bot.download_file(file_info.file_path)
         img_b64 = base64.b64encode(file_data).decode('utf-8')
 
-    # Для теста всех кидаем в бесплатную очередь
-    free_queue.put({'chat_id': message.chat.id, 'text': text, 'img': img_b64})
-    bot.send_message(message.chat.id, "⏳ Задача принята. Решаю...")
+    task = {'chat_id': message.chat.id, 'is_vip': is_vip, 'text': text, 'img': img_b64}
+    
+    if is_vip:
+        vip_queue.put(task)
+        bot.send_message(message.chat.id, "🚀 VIP: Решаю без очереди...")
+    else:
+        free_queue.put(task)
+        # Возвращаем твой "байт" на VIP
+        bot.send_message(message.chat.id, "⏳ Задача в очереди. Для мгновенного решения/vip.")
 
 if __name__ == '__main__':
-    print("Бот начинает опрос Telegram...")
     bot.polling(none_stop=True)
