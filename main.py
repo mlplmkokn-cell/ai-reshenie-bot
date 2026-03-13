@@ -11,15 +11,14 @@ from dotenv import load_dotenv
 from yookassa import Configuration, Payment
 from flask import Flask
 
-# --- ИНИЦИАЛИЗАЦИЯ FLASK ---
+# --- ИНИЦИАЛИЗАЦИЯ FLASK (ДЛЯ RAILWAY) ---
 app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Bot is running on Railway", 200
+    return "Bot is running perfectly on Railway", 200
 
 def run_flask():
-    # Railway требует, чтобы приложение слушало порт, иначе оно решит, что бот упал
     port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port)
 
@@ -34,10 +33,9 @@ SHOP_API_KEY = os.getenv('SHOP_API_KEY')
 FREE_KEY = os.getenv('FREE_GEMINI_KEY')
 VIP_KEY = os.getenv('VIP_GEMINI_KEY')
 
-# Проверка токена перед созданием объекта бота
-bot = None
 if not BOT_TOKEN:
-    print("❌ ОШИБКА: BOT_TOKEN не найден в переменных окружения!")
+    print("❌ КРИТИЧЕСКАЯ ОШИБКА: BOT_TOKEN не найден в переменных Railway!")
+    bot = None
 else:
     bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -46,17 +44,15 @@ if SHOP_ID and SHOP_API_KEY:
     Configuration.account_id = SHOP_ID
     Configuration.secret_key = SHOP_API_KEY
 
-# Цены
 PRICE_TRIAL = 99.00
 PRICE_REGULAR = 199.00
 
-# Очереди задач
 free_queue = queue.Queue()
 vip_queue = queue.Queue()
 
 # --- РАБОТА С БАЗОЙ ДАННЫХ ---
 def init_db():
-    conn = sqlite3.connect('data_v5.db')
+    conn = sqlite3.connect('data_v5.db', check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                         user_id INTEGER PRIMARY KEY,
@@ -92,10 +88,9 @@ def check_trial_used(user_id):
     except:
         return False
 
-# --- РАБОТА С AI (Gemini v1beta) ---
+# --- ЖЕЛЕЗОБЕТОННАЯ РАБОТА С AI (Обход ошибки 404) ---
 def ask_ai(prompt, img_b64, api_key, is_vip):
-    # Исправленный URL (v1beta) для работы на Railway
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    url_v1 = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     
     if is_vip:
@@ -103,35 +98,37 @@ def ask_ai(prompt, img_b64, api_key, is_vip):
     else:
         sys_prompt = "Дай только краткий ответ. В конце напиши: 'Для подробного решения купите /vip'."
         
-    # Формируем структуру запроса строго по документации Google
     contents = {
         "contents": [{
-            "parts": [
-                {"text": f"{sys_prompt}\nЗадание: {prompt}"}
-            ]
+            "parts": [{"text": f"{sys_prompt}\nЗадание: {prompt}"}]
         }]
     }
     
     if img_b64:
         contents["contents"][0]["parts"].append({
-            "inline_data": {
-                "mime_type": "image/jpeg",
-                "data": img_b64
-            }
+            "inline_data": {"mime_type": "image/jpeg", "data": img_b64}
         })
 
     try:
-        print(f">>> Запрос к Gemini (VIP: {is_vip})...")
-        response = requests.post(url, headers=headers, json=contents, timeout=40)
+        print(f">>> Отправка запроса к Gemini (VIP: {is_vip})...")
+        # Пробуем основную стабильную версию API
+        response = requests.post(url_v1, headers=headers, json=contents, timeout=40)
+        
+        # Если выдает 404, переключаемся на v1beta автоматически
+        if response.status_code == 404:
+            print(">>> v1 не найден, переключаюсь на v1beta...")
+            url_v1beta = url_v1.replace("/v1/", "/v1beta/")
+            response = requests.post(url_v1beta, headers=headers, json=contents, timeout=40)
+
         res_json = response.json()
         
         if response.status_code != 200:
-            print(f"!!! Ошибка API ({response.status_code}): {res_json}")
-            return "⚠️ Нейросеть временно перегружена. Попробуйте через минуту."
+            print(f"!!! Ошибка API от Google ({response.status_code}): {res_json}")
+            return "⚠️ Нейросеть отклонила запрос. Проверьте правильность FREE_GEMINI_KEY в Railway."
 
         return res_json['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
-        print(f"!!! Ошибка запроса: {e}")
+        print(f"!!! Системная ошибка запроса: {e}")
         return "❌ Ошибка связи с сервером AI. Попробуйте отправить задачу еще раз."
 
 # --- ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
@@ -172,7 +169,7 @@ if bot:
             bot.send_message(message.chat.id, f"💎 VIP за {int(price)}₽\n\nДаёт подробные решения и работу без очереди!", reply_markup=markup)
         except Exception as e:
             print(f"Ошибка кассы: {e}")
-            bot.send_message(message.chat.id, "❌ Ошибка платежной системы. Проверьте настройки.")
+            bot.send_message(message.chat.id, "❌ Ошибка платежной системы. Проверьте настройки YooKassa.")
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith('check_'))
     def check_payment_callback(call):
@@ -209,7 +206,7 @@ if bot:
                 bot.delete_message(message.chat.id, status.message_id)
             except Exception as e:
                 print(f"Ошибка фото: {e}")
-                bot.edit_message_text("❌ Ошибка загрузки картинки.", message.chat.id, status.message_id)
+                bot.edit_message_text("❌ Ошибка загрузки картинки. Попробуй еще раз.", message.chat.id, status.message_id)
                 return
 
         task = {'chat_id': message.chat.id, 'is_vip': is_vip, 'text': text, 'img': img_b64}
@@ -219,7 +216,7 @@ if bot:
             bot.send_message(message.chat.id, "🚀 VIP: Решаю вне очереди...")
         else:
             free_queue.put(task)
-            bot.send_message(message.chat.id, "⏳ Задача в очереди. Купите /vip для мгновенного ответа.")
+            bot.send_message(message.chat.id, "⏳ Задача в очереди. Для мгновенного ответа купите /vip.")
 
 # --- ВОРКЕР (ОБРАБОТКА ОЧЕРЕДИ) ---
 def worker():
@@ -236,7 +233,7 @@ def worker():
             if task:
                 ans = ask_ai(task['text'], task['img'], key, task['is_vip'])
                 bot.send_message(task['chat_id'], ans)
-                time.sleep(1) # Небольшая пауза между ответами
+                time.sleep(1)
         except Exception as e:
             print(f"Ошибка воркера: {e}")
         time.sleep(0.5)
@@ -246,9 +243,10 @@ threading.Thread(target=worker, daemon=True).start()
 # --- ЗАПУСК ---
 if __name__ == '__main__':
     if bot:
-        print("✅ Бот успешно запущен!")
-        bot.polling(none_stop=True)
+        print("✅ Бот успешно запущен и готов к работе!")
+        # Используем infinity_polling для защиты от падений сети и мелких конфликтов
+        bot.infinity_polling(timeout=10, long_polling_timeout=5)
     else:
-        # Если токена нет, не даем скрипту сразу закрыться (для работы Flask)
+        print("Бот НЕ запущен из-за отсутствия BOT_TOKEN. Сервер Flask работает в фоне.")
         while True:
             time.sleep(10)
